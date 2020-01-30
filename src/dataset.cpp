@@ -8,13 +8,18 @@
  *
  */
 
-
 #include "dataset.h"
-#include "utils.h"
 #include <fstream>
 #include <iostream>
 #include <string>
-using namespace std;
+#include "utils.h"
+
+using std::cout;
+using std::ifstream;
+using std::endl;
+using std::shared_ptr;
+using std::make_shared;
+using std::move;
 
 // ************************************************
 // 			Word 
@@ -34,18 +39,15 @@ Word::Word(int word_no, int lexicon) {
 	this->lexicon = lexicon;
 }
 
-Word::~Word(){}
-
+Word::~Word() {}
 
 void Word::SetWordNo(int word_no) {
 	this->word_no = word_no;
 }
 
-
 void Word::SetLexicon(int lexicon) {
 	this->lexicon = lexicon;
 }
-
 
 int Word::GetLexicon() {
 	return this->lexicon;
@@ -55,9 +57,6 @@ int Word::GetWordNo() {
 	return this->word_no;
 }
 
-
-
-
 // ************************************************
 // 			Segment 
 // ************************************************
@@ -65,18 +64,17 @@ Segment::Segment() {
 	this->sentiment = -1;
 }
 
-Segment::~Segment(){}
-
+Segment::~Segment() {}
 
 void Segment::SetSentiment(int sentiment) {
 	this->sentiment = sentiment;
 }
 
-void Segment::SetWords(vector<Word*> & words) {
+void Segment::SetWords(vector<shared_ptr<Word>> &words) {
 	this->words = words;
 
 	for (auto pword : words) {
-		int word_no =  pword->GetWordNo();
+		int word_no = pword->GetWordNo();
 		map<int, int>::iterator it = this->word_cnt.find(word_no);
 		if (it != this->word_cnt.end()) {
 			it->second += 1;
@@ -90,12 +88,11 @@ int Segment::GetSentiment() {
 	return this->sentiment;
 }
 
-vector<Word*> Segment::GetWords() {
+const vector<shared_ptr<Word>>& Segment::GetWords() const {
 	return this->words;
 }
 
-
-map<int, int> Segment::GetWordCnt() {
+const map<int, int>& Segment::GetWordCnt() const {
 	return this->word_cnt;
 }
 
@@ -110,44 +107,77 @@ int Segment::GetNumSentenceSentis() {
 // ************************************************
 // 			Sentence 
 // ************************************************
-Sentence::Sentence(){
+Sentence::Sentence(int nsentis){
 	this->topic = -1;
-	// this->senti_cnt = new int[this->nsentis];
+
+	this->senti_cnt = new int[nsentis];
+	for (int i = 0; i < nsentis; i++) {
+		this->senti_cnt[i] = 0;
+	}
+
+	for (int i = 0; i < nsentis; i++) {
+		this->senti_word_cnt.push_back(map<int, int>());
+	}
 }
 
-Sentence::~Sentence(){}
+Sentence::~Sentence() {
+	if (this->senti_cnt) {
+		delete this->senti_cnt;
+	}
+}
 
 void Sentence::SetTopic(int topic) {
 	this->topic = topic;
 }
 
-void Sentence::SetSegment(vector<Segment*> &segments) {
+void Sentence::SetSegment(vector<shared_ptr<Segment>> &segments) {
 	this->segments = segments;
 }
-
 
 int Sentence::GetTopic() {
 	return this->topic;
 }
 
-vector<Segment*> Sentence::GetSegments() {
+const vector<shared_ptr<Segment>>& Sentence::GetSegments() const {
 	return this->segments;
 }
 
-map<int, int> Sentence::GetSentiCnt() {
+const int* Sentence::GetSentiCnt() const {
 	return this->senti_cnt;
 }
 
-map<int, map<int, int> > Sentence::GetSentiWordCnt() {
+const vector<map<int, int>>& Sentence::GetSentiWordCnt() const {
 	return this->senti_word_cnt;
 }
 
+void Sentence::IncreaseSentiCnt(int senti, int cnt) {
+	this->senti_cnt += cnt;
+}
 
+void Sentence::DecreaseSentiCnt(int senti, int cnt) {
+	this->senti_cnt -= cnt;
+}
+
+void Sentence::IncreaseSentiWordCnt(int senti, int word, int cnt) {
+	auto it = senti_word_cnt[senti].find(word);
+	if (it != senti_word_cnt[senti].end()) {
+		it->second += cnt;
+	} else {
+		senti_word_cnt[senti].insert({word, cnt});
+	}
+}
+
+void Sentence::DecreaseSentiWordCnt(int senti, int word, int cnt) {
+	auto it = senti_word_cnt[senti].find(word);
+	if (it != senti_word_cnt[senti].end()) {
+		it->second -= cnt;
+	}
+}
 
 // ************************************************
 // 			Document 
 // ************************************************
-Document::Document(){
+Document::Document() {
 	this->doc_no = -1;
 }
 
@@ -157,20 +187,17 @@ Document::Document(int doc_no) {
 
 Document::~Document() {}
 
-
 void Document::SetDocNo(int doc_no) {
 	this->doc_no = doc_no;
 }
-
 
 void Document::SetDocId(string doc_id) {
 	this->docId = doc_id;
 }
 
-void Document::SetSentences(vector<Sentence*> &sentences) {
+void Document::SetSentences(vector<shared_ptr<Sentence>> &sentences) {
 	this->sentences = sentences;
 }
-
 
 int Document::GetDocNo() {
 	return this->doc_no;
@@ -180,11 +207,9 @@ string Document::GetDocId() {
 	return this->docId;
 }
 
-
-vector<Sentence*> Document::GetSentences() {
+const vector<shared_ptr<Sentence>>& Document::GetSentences() const {
 	return this->sentences;
 }
-
 
 // ************* Dataset ********
 Dataset::Dataset() {
@@ -193,9 +218,7 @@ Dataset::Dataset() {
 	this->nsentis = 0;
 }
 
-
 Dataset::~Dataset() {}
-
 
 void Dataset::SetNumSentis(int nsentis) {
 	this->nsentis = nsentis;
@@ -207,66 +230,49 @@ void Dataset::SetNumSentis(int nsentis) {
  * @return         whether success.
  */
 int Dataset::ReadDocs(string doc_file) {
-
 	cout << "Reading documents:" << doc_file << " ..." << endl;
 
-	// string doc_file = doc_dir + "/" + "DocumentId.txt";
 	ifstream ifile(doc_file);
 
 	if (ifile.is_open()) {
-
 		int doc_no = 0;
 		string doc_str, line, doc_id;
 
-		// int print_no = 534;
-
 		while (getline(ifile, line)) { // read a document ids string
-
 			vector<string> terms = Utils::Split(line, ":");
 			doc_id = terms[0];
 			doc_str = terms[1];
 
-			Document * pdoc = new Document();
+			shared_ptr<Document> pdoc = make_shared<Document>();
 			pdoc->SetDocNo(doc_no++);
 			pdoc->SetDocId(doc_id);
 
-			// if (doc_no == print_no) cout << "doc_str = " << doc_str << endl;
-
 			vector<string> sentences_str = Utils::Split(doc_str, "\t\t");
-			vector<Sentence*> sentences;
+			vector<shared_ptr<Sentence>> sentences;
 
 			for (auto sen : sentences_str) { // for each sentence ids string
-
-				// if (doc_no == print_no) cout << "sen = " << sen << endl;
-
-				Sentence * psentence = new Sentence();
+				shared_ptr<Sentence> psentence = make_shared<Sentence>(this->nsentis);
 				vector<string> segs_str = Utils::Split(sen, "\t");
-				vector<Segment*> segments;
+				vector<shared_ptr<Segment>> segments;
 
 				for (auto seg : segs_str) { // for each segment ids string
-
-					// if (doc_no == print_no) cout << "seg = " << seg << endl;
-
-					Segment * psegment = new Segment();
+					shared_ptr<Segment> psegment = make_shared<Segment>();
 					vector<string> words_str = Utils::Split(seg, " ");
-					vector<Word*> words; // word ids int
+					vector<shared_ptr<Word>> words; // word ids int
 
 					for (auto word_str : words_str) { // for each word ids string
-
-						// if (doc_no == print_no) cout << "word_str = " << word_str << endl;
-
 						int word_id = stoi(word_str);
-						Word * pword = new Word(word_id);
-						words.push_back(pword);
+						shared_ptr<Word> pword = make_shared<Word>(word_id);
+						words.emplace_back(move(pword));
 					}
 					psegment->SetWords(words);
-					segments.push_back(psegment);
+					segments.emplace_back(move(psegment));
 				}
 				psentence->SetSegment(segments);
-				sentences.push_back(psentence);
+				sentences.emplace_back(move(psentence));
 			}
 			pdoc->SetSentences(sentences);
-			this->docs.push_back(pdoc);
+			this->docs.emplace_back(move(pdoc));
 		}
 	}
 	this->ndocs = this->docs.size();
@@ -278,7 +284,6 @@ int Dataset::ReadDocs(string doc_file) {
 	return 0;
 }
 
-
 /**
  * Read sentiment lexicon words.
  * @param  lexicon_dir directory of the lexicon file. If directory is empty, 
@@ -286,7 +291,6 @@ int Dataset::ReadDocs(string doc_file) {
  * @return             whether read success.
  */
 int Dataset::ReadLexicon(string lexicon_dir) {
-
 	if (lexicon_dir == "") {
 		cout << "Does not use lexicon prior!" << endl;
 		return 0;
@@ -297,17 +301,14 @@ int Dataset::ReadLexicon(string lexicon_dir) {
 	string lexiocn_preffix = "SentiWords_";
 
 	for (int s = 0; s < this->nsentis; ++s) {
-
 		int senti_words_cnt = 0;
-
 		string lexicon_file = lexicon_dir + "/" + lexiocn_preffix 
 		+ to_string(s) + ".txt";
 
 		vector<int> senti_words;
 		ifstream ifile(lexicon_file);
 
-		if (ifile.is_open()) {	
-
+		if (ifile.is_open()) {
 			string word;
 			while (getline(ifile, word)) {
 				word.pop_back();
@@ -315,8 +316,6 @@ int Dataset::ReadLexicon(string lexicon_dir) {
 				if (it != this->word2id.end()) {
 					senti_words.push_back(it->second);
 					senti_words_cnt += 1;
-
-					// this->wid2lexicon[it->second] = s;
 				}
 			}
 			ifile.close();
@@ -327,18 +326,17 @@ int Dataset::ReadLexicon(string lexicon_dir) {
 			return 1;
 		}
 
-		this->lexicon_words.push_back(senti_words);
+		this->lexicon_words.emplace_back(std::move(senti_words));
 		cout << "number of words in sentiment " << s << " is: " 
-		<< senti_words_cnt << endl;
+		     << senti_words_cnt << endl;
 		total_senti_words += senti_words_cnt;
 	}
 
 	cout << "total number of words in lexicon is: " 
-	<< total_senti_words << endl;
+       << total_senti_words << endl;
 
 	return 0;
 }
-
 
 /**
  * Read vocabulary from file. 
@@ -349,7 +347,6 @@ int Dataset::ReadLexicon(string lexicon_dir) {
 int Dataset::ReadVocab(string vocab_dir, bool reverse) {
 	string vocab_file = vocab_dir + "/" + "vocabulary.txt";
 	ifstream ifile(vocab_file);
-
 
 	string word;
 	int id = 1; // Word Id starts from 1.
@@ -373,27 +370,21 @@ int Dataset::ReadVocab(string vocab_dir, bool reverse) {
 		this->nvocab = this->id2word.size();
 	}
 	
-	
 	if (this->nvocab == 0) {
 		cout << "Empty vocabulary!" << endl;
 		return 1;
 	}
 	cout << "vocabulary size is " << this->nvocab << endl;
-	// cout << "id = " << id << endl;
 	return 0;
 }
 
-
-
-vector<Document*> Dataset::GetDocs() {
+const vector<shared_ptr<Document>>& Dataset::GetDocs() const {
 	return this->docs;
 }
 
-
-vector<vector<int> > Dataset::GetLexicon() {
+const vector<vector<int>>& Dataset::GetLexicon() const {
 	return this->lexicon_words;
 }
-
 
 int Dataset::GetNumDocs() {
 	return this->ndocs; 
@@ -403,10 +394,6 @@ int Dataset::GetNumVocab() {
 	return this->nvocab; 
 }
 
-
-map<int, string> Dataset::GetId2Word() {
+const map<int, string>& Dataset::GetId2Word() const {
 	return this->id2word;
 }
-
-
-
